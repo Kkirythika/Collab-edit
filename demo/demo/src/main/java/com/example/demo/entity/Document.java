@@ -29,7 +29,7 @@ public class Document {
         return content;
     }
 
-    // ✅ Setters (IMPORTANT)
+    // ✅ Setters
     public void setId(Long id) {
         this.id = id;
     }
