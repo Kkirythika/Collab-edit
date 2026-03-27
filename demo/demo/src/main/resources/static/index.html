@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Realtime Editor</title>
+</head>
+<body>
+
+<h2>Realtime Collaborative Editor</h2>
+
+<input id="username" placeholder="Enter your name" />
+<button onclick="join()">Join</button>
+
+<p id="status">Status: Disconnected</p>
+
+<h3>Active Users</h3>
+<ul id="users"></ul>
+
+<textarea id="editor" rows="10" cols="60" placeholder="Start typing..."></textarea>
+
+<script>
+let ws;
+let username;
+
+function join() {
+  username = document.getElementById("username").value;
+
+  ws = new WebSocket("ws://localhost:8080/ws");
+
+  ws.onopen = () => {
+    document.getElementById("status").innerText = "Connected";
+
+    ws.send(JSON.stringify({
+      type: "join",
+      user: username
+    }));
+  };
+
+  ws.onmessage = (msg) => {
+    const data = JSON.parse(msg.data);
+
+    if (data.type === "users") {
+      updateUsers(data.users);
+    }
+
+    if (data.type === "edit") {
+      document.getElementById("editor").value = data.content;
+    }
+  };
+}
+
+// SEND EDIT
+document.getElementById("editor").addEventListener("input", () => {
+  if (!ws) return;
+
+  ws.send(JSON.stringify({
+    type: "edit",
+    user: username,
+    content: document.getElementById("editor").value
+  }));
+});
+
+// UPDATE USERS
+function updateUsers(users) {
+  const ul = document.getElementById("users");
+  ul.innerHTML = "";
+
+  users.forEach(u => {
+    const li = document.createElement("li");
+    li.innerText = u;
+    ul.appendChild(li);
+  });
+}
+</script>
+
+</body>
+</html>

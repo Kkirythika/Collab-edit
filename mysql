@@ -1,0 +1,120 @@
+ mvn spring-boot:run
+package com.example.demo.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.web.socket.config.annotation.*;
+
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    @Override
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // ✅ Fix: replaced setAllowedOrigins("*") with setAllowedOriginPatterns("*")
+        registry.addEndpoint("/ws")
+                .setAllowedOriginPatterns("*")   // allows all origins during development
+                .withSockJS();
+    }
+
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        registry.enableSimpleBroker("/topic");   // broadcast prefix
+        registry.setApplicationDestinationPrefixes("/app"); // client send prefix
+    }
+}
+
+
+
+package com.example.demo.config;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+import com.example.demo.entity.Document;
+import com.example.demo.model.Message;
+import com.example.demo.repository.DocumentRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.web.socket.*;
+import org.springframework.web.socket.handler.TextWebSocketHandler;
+
+@Component
+public class EditorHandler extends TextWebSocketHandler {
+
+    private static Set<WebSocketSession> sessions = ConcurrentHashMap.newKeySet();
+    private static Map<String, String> users = new ConcurrentHashMap<>();
+
+    private final DocumentRepository repo;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    @Autowired
+    public EditorHandler(DocumentRepository repo) {
+        this.repo = repo;
+    }
+
+    @Override
+    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+        sessions.add(session);
+
+        // assign user
+        String username = "User" + session.getId().substring(0, 4);
+        users.put(session.getId(), username);
+
+        // send existing document
+        Optional<Document> doc = repo.findById(1L);
+        if (doc.isPresent()) {
+            session.sendMessage(new TextMessage(doc.get().getContent()));
+        }
+
+        broadcastUsers();
+    }
+
+    @Override
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+
+        Message msg = mapper.readValue(message.getPayload(), Message.class);
+
+        if ("edit".equals(msg.getType())) {
+
+            String text = msg.getContent();
+            System.out.println("Saving: " + text);
+
+            // ✅ Save to DB
+            Document doc = repo.findById(1L).orElse(new Document());
+            doc.setId(1L);
+            doc.setContent(text);
+            repo.save(doc);
+
+            // ✅ Broadcast to all
+            for (WebSocketSession s : sessions) {
+                if (s.isOpen()) {
+                    s.sendMessage(new TextMessage(mapper.writeValueAsString(msg)));
+                }
+            }
+        }
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        sessions.remove(session);
+        users.remove(session.getId());
+        broadcastUsers();
+    }
+
+    // ✅ Send active users list
+    private void broadcastUsers() {
+        try {
+            String userList = mapper.writeValueAsString(users.values());
+            for (WebSocketSession s : sessions) {
+                if (s.isOpen()) {
+                    s.sendMessage(new TextMessage(userList));
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
